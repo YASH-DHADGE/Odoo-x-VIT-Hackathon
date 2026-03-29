@@ -1,6 +1,3 @@
-// Reimbursement Management System — Prisma Schema
-// PostgreSQL + UUID primary keys + full enum types
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,7 +6,239 @@ datasource db {
   provider = "postgresql"
 }
 
-// ─── ENUMS ───────────────────────────────────────────────
+model Company {
+  id                String                @id @default(uuid())
+  name              String
+  country           String
+  defaultCurrency   String
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  approvalTemplates ApprovalTemplate[]
+  expenses          Expense[]
+  routingRules      TemplateRoutingRule[]
+  users             User[]
+
+  @@index([name])
+  @@map("companies")
+}
+
+model User {
+  id                          String               @id @default(uuid())
+  companyId                   String
+  name                        String
+  email                       String               @unique
+  passwordHash                String
+  role                        Role                 @default(EMPLOYEE)
+  managerId                   String?
+  isManagerApprover           Boolean              @default(false)
+  mustChangePassword          Boolean              @default(false)
+  refreshToken                String?
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+  approvalAuditActions        ApprovalAuditLog[]   @relation("ApprovalAuditActor")
+  specificApproverRuleConfigs ApprovalRuleConfig[] @relation("RuleConfigSpecificApprover")
+  approvalSteps               ApprovalStep[]
+  specificApproverTemplates   ApprovalTemplate[]   @relation("SpecificApprover")
+  expenseApprovals            ExpenseApproval[]
+  submittedExpenses           Expense[]            @relation("SubmittedExpenses")
+  passwordResetTokens         PasswordResetToken[]
+  company                     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  manager                     User?                @relation("ManagerSubordinates", fields: [managerId], references: [id])
+  subordinates                User[]               @relation("ManagerSubordinates")
+
+  @@index([companyId])
+  @@index([email])
+  @@index([managerId])
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model Expense {
+  id                       String               @id @default(uuid())
+  companyId                String
+  submittedById            String
+  templateId               String?
+  routingRuleId            String?
+  amount                   Decimal              @db.Decimal(12, 2)
+  currency                 String
+  convertedAmount          Decimal?             @db.Decimal(12, 2)
+  companyCurrency          String?
+  exchangeRateUsed         Decimal?             @db.Decimal(12, 6)
+  rateTimestamp            DateTime?
+  category                 ExpenseCategory
+  description              String
+  date                     DateTime
+  status                   ExpenseStatus        @default(PENDING)
+  receiptUrl               String?
+  ocrExtracted             Boolean              @default(false)
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+  currentApprovalStepOrder Int?
+  workflowMetadata         Json?
+  approvalAuditLogs        ApprovalAuditLog[]
+  approvals                ExpenseApproval[]
+  company                  Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  routingRule              TemplateRoutingRule? @relation(fields: [routingRuleId], references: [id])
+  submittedBy              User                 @relation("SubmittedExpenses", fields: [submittedById], references: [id], onDelete: Cascade)
+  template                 ApprovalTemplate?    @relation(fields: [templateId], references: [id])
+  ocrJob                   OcrJob?
+
+  @@index([submittedById])
+  @@index([status])
+  @@index([companyId, status])
+  @@map("expenses")
+}
+
+model ApprovalTemplate {
+  id                  String                @id @default(uuid())
+  companyId           String
+  name                String
+  conditionalRuleType ConditionalRuleType   @default(NONE)
+  percentageThreshold Float?
+  specificApproverId  String?
+  isDefault           Boolean               @default(false)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  ruleConfig          ApprovalRuleConfig?
+  steps               ApprovalStep[]
+  company             Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  specificApprover    User?                 @relation("SpecificApprover", fields: [specificApproverId], references: [id])
+  expenses            Expense[]
+  routingRules        TemplateRoutingRule[]
+
+  @@index([companyId])
+  @@map("approval_templates")
+}
+
+model TemplateRoutingRule {
+  id         String           @id @default(uuid())
+  companyId  String
+  templateId String
+  minAmount  Decimal          @db.Decimal(12, 2)
+  maxAmount  Decimal?         @db.Decimal(12, 2)
+  priority   Int              @default(0)
+  isActive   Boolean          @default(true)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  expenses   Expense[]
+  company    Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  template   ApprovalTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, isActive])
+  @@index([templateId])
+  @@map("template_routing_rules")
+}
+
+model ApprovalStep {
+  id         String           @id @default(uuid())
+  templateId String
+  stepOrder  Int
+  approverId String
+  roleLabel  String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  isRequired Boolean          @default(true)
+  approver   User             @relation(fields: [approverId], references: [id], onDelete: Cascade)
+  template   ApprovalTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, stepOrder])
+  @@index([templateId])
+  @@map("approval_steps")
+}
+
+model ExpenseApproval {
+  id            String               @id @default(uuid())
+  expenseId     String
+  approverId    String
+  stepOrder     Int
+  status        ApprovalStatus       @default(PENDING)
+  comments      String?
+  actionedAt    DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  isConditional Boolean              @default(false)
+  isRequired    Boolean              @default(true)
+  source        ApprovalActionSource @default(TEMPLATE)
+  approver      User                 @relation(fields: [approverId], references: [id], onDelete: Cascade)
+  expense       Expense              @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@index([expenseId])
+  @@index([approverId, status])
+  @@map("expense_approvals")
+}
+
+model ApprovalRuleConfig {
+  id                            String              @id @default(uuid())
+  templateId                    String              @unique
+  ruleType                      ConditionalRuleType @default(NONE)
+  percentageThreshold           Float?
+  specificApproverId            String?
+  requireAllRequiredApprovals   Boolean             @default(true)
+  allowSpecificApproverOverride Boolean             @default(true)
+  createdAt                     DateTime            @default(now())
+  updatedAt                     DateTime            @updatedAt
+  specificApprover              User?               @relation("RuleConfigSpecificApprover", fields: [specificApproverId], references: [id])
+  template                      ApprovalTemplate    @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+  @@index([specificApproverId])
+  @@map("approval_rule_configs")
+}
+
+model ApprovalAuditLog {
+  id        String                 @id @default(uuid())
+  expenseId String
+  actorId   String?
+  eventType ApprovalAuditEventType
+  payload   Json?
+  createdAt DateTime               @default(now())
+  actor     User?                  @relation("ApprovalAuditActor", fields: [actorId], references: [id])
+  expense   Expense                @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@index([expenseId, createdAt])
+  @@index([actorId])
+  @@map("approval_audit_logs")
+}
+
+model OcrJob {
+  id          String       @id @default(uuid())
+  expenseId   String       @unique
+  status      OcrJobStatus @default(QUEUED)
+  rawResponse Json?
+  parsedData  Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  expense     Expense      @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@index([expenseId])
+  @@map("ocr_jobs")
+}
+
+model ExchangeRate {
+  id             String   @id @default(uuid())
+  baseCurrency   String
+  targetCurrency String
+  rate           Decimal  @db.Decimal(12, 6)
+  fetchedAt      DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([baseCurrency, targetCurrency])
+  @@map("exchange_rates")
+}
 
 enum Role {
   ADMIN
@@ -67,263 +296,4 @@ enum OcrJobStatus {
   PROCESSING
   COMPLETED
   FAILED
-}
-
-// ─── MODELS ──────────────────────────────────────────────
-
-model Company {
-  id              String   @id @default(uuid())
-  name            String
-  country         String
-  defaultCurrency String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  users              User[]
-  expenses           Expense[]
-  approvalTemplates  ApprovalTemplate[]
-  routingRules       TemplateRoutingRule[]
-
-  @@index([name])
-  @@map("companies")
-}
-
-model User {
-  id                 String   @id @default(uuid())
-  companyId          String
-  name               String
-  email              String   @unique
-  passwordHash       String
-  role               Role     @default(EMPLOYEE)
-  managerId          String?
-  isManagerApprover  Boolean  @default(false)
-  mustChangePassword Boolean  @default(false)
-  refreshToken       String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  // Relations
-  company            Company  @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  manager            User?    @relation("ManagerSubordinates", fields: [managerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  subordinates       User[]   @relation("ManagerSubordinates")
-
-  submittedExpenses  Expense[]          @relation("SubmittedExpenses")
-  expenseApprovals   ExpenseApproval[]
-  approvalSteps      ApprovalStep[]
-  passwordResetTokens PasswordResetToken[]
-
-  // Reverse relation for specific approver in templates
-  specificApproverTemplates ApprovalTemplate[] @relation("SpecificApprover")
-  specificApproverRuleConfigs ApprovalRuleConfig[] @relation("RuleConfigSpecificApprover")
-  approvalAuditActions ApprovalAuditLog[] @relation("ApprovalAuditActor")
-
-  @@index([companyId])
-  @@index([email])
-  @@index([managerId])
-  @@map("users")
-}
-
-model PasswordResetToken {
-  id        String   @id @default(uuid())
-  userId    String
-  token     String   @unique
-  expiresAt DateTime
-  used      Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-
-  @@index([token])
-  @@index([userId])
-  @@map("password_reset_tokens")
-}
-
-model Expense {
-  id               String          @id @default(uuid())
-  companyId        String
-  submittedById    String
-  templateId       String?
-  routingRuleId    String?
-  amount           Decimal         @db.Decimal(12, 2)
-  currency         String
-  convertedAmount  Decimal?        @db.Decimal(12, 2)
-  companyCurrency  String?
-  exchangeRateUsed Decimal?        @db.Decimal(12, 6)
-  rateTimestamp    DateTime?
-  currentApprovalStepOrder Int?
-  workflowMetadata Json?
-  category         ExpenseCategory
-  description      String
-  date             DateTime
-  status           ExpenseStatus   @default(PENDING)
-  receiptUrl       String?
-  ocrExtracted     Boolean         @default(false)
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-
-  // Relations
-  company       Company              @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  submittedBy   User                 @relation("SubmittedExpenses", fields: [submittedById], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  template      ApprovalTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  routingRule   TemplateRoutingRule? @relation(fields: [routingRuleId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-
-  approvals     ExpenseApproval[]
-  approvalAuditLogs ApprovalAuditLog[]
-  ocrJob        OcrJob?
-
-  @@index([submittedById])
-  @@index([status])
-  @@index([companyId, status])
-  @@map("expenses")
-}
-
-model ApprovalTemplate {
-  id                   String             @id @default(uuid())
-  companyId            String
-  name                 String
-  conditionalRuleType  ConditionalRuleType @default(NONE)
-  percentageThreshold  Float?
-  specificApproverId   String?
-  isDefault            Boolean            @default(false)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-
-  // Relations
-  company           Company              @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  specificApprover  User?                @relation("SpecificApprover", fields: [specificApproverId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-
-  steps             ApprovalStep[]
-  expenses          Expense[]
-  routingRules      TemplateRoutingRule[]
-  ruleConfig        ApprovalRuleConfig?
-
-  @@index([companyId])
-  @@map("approval_templates")
-}
-
-model TemplateRoutingRule {
-  id         String   @id @default(uuid())
-  companyId  String
-  templateId String
-  minAmount  Decimal  @db.Decimal(12, 2)
-  maxAmount  Decimal? @db.Decimal(12, 2)  // null = unbounded upper limit
-  priority   Int      @default(0)
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  // Relations
-  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  template ApprovalTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  expenses Expense[]
-
-  @@index([companyId, isActive])
-  @@index([templateId])
-  @@map("template_routing_rules")
-}
-
-model ApprovalStep {
-  id         String   @id @default(uuid())
-  templateId String
-  stepOrder  Int
-  approverId String
-  isRequired Boolean  @default(true)
-  roleLabel  String?  // e.g., "Manager", "Finance", "Director"
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  // Relations
-  template ApprovalTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  approver User             @relation(fields: [approverId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-
-  @@unique([templateId, stepOrder])
-  @@index([templateId])
-  @@map("approval_steps")
-}
-
-model ExpenseApproval {
-  id         String         @id @default(uuid())
-  expenseId  String
-  approverId String
-  stepOrder  Int
-  isRequired Boolean        @default(true)
-  isConditional Boolean     @default(false)
-  source     ApprovalActionSource @default(TEMPLATE)
-  status     ApprovalStatus @default(PENDING)
-  comments   String?
-  actionedAt DateTime?
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
-
-  // Relations
-  expense  Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  approver User    @relation(fields: [approverId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-
-  @@index([expenseId])
-  @@index([approverId, status])
-  @@map("expense_approvals")
-}
-
-model ApprovalRuleConfig {
-  id                         String              @id @default(uuid())
-  templateId                 String              @unique
-  ruleType                   ConditionalRuleType @default(NONE)
-  percentageThreshold        Float?
-  specificApproverId         String?
-  requireAllRequiredApprovals Boolean           @default(true)
-  allowSpecificApproverOverride Boolean         @default(true)
-  createdAt                  DateTime            @default(now())
-  updatedAt                  DateTime            @updatedAt
-
-  template        ApprovalTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  specificApprover User?           @relation("RuleConfigSpecificApprover", fields: [specificApproverId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-
-  @@index([templateId])
-  @@index([specificApproverId])
-  @@map("approval_rule_configs")
-}
-
-model ApprovalAuditLog {
-  id        String                @id @default(uuid())
-  expenseId String
-  actorId   String?
-  eventType ApprovalAuditEventType
-  payload   Json?
-  createdAt DateTime              @default(now())
-
-  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  actor   User?   @relation("ApprovalAuditActor", fields: [actorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-
-  @@index([expenseId, createdAt])
-  @@index([actorId])
-  @@map("approval_audit_logs")
-}
-
-model OcrJob {
-  id         String       @id @default(uuid())
-  expenseId  String       @unique
-  status     OcrJobStatus @default(QUEUED)
-  rawResponse Json?
-  parsedData  Json?
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
-
-  // Relations
-  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-
-  @@index([expenseId])
-  @@map("ocr_jobs")
-}
-
-model ExchangeRate {
-  id             String   @id @default(uuid())
-  baseCurrency   String
-  targetCurrency String
-  rate           Decimal  @db.Decimal(12, 6)
-  fetchedAt      DateTime
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  @@unique([baseCurrency, targetCurrency])
-  @@map("exchange_rates")
 }
