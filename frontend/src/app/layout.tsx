@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist_Mono, Manrope, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { QueryProvider } from "@/providers/query-provider";
+import { ThemeProvider } from "@/providers/theme-provider";
 import { Toaster } from "sonner";
 
 const manrope = Manrope({
@@ -21,8 +22,8 @@ const spaceGrotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: {
-    default: "Odoo x VIT Check",
-    template: "%s | Odoo x VIT Check",
+    default: "Odoo x VIT — Finance Hub",
+    template: "%s | Odoo x VIT",
   },
   description: "Reimbursement Management System",
 };
@@ -35,13 +36,21 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${manrope.variable} ${spaceGrotesk.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col text-[15px] leading-relaxed selection:bg-primary/20 selection:text-foreground">
-        <QueryProvider>
-          {children}
-          <Toaster position="top-right" />
-        </QueryProvider>
+      <body className="min-h-full flex flex-col text-[15px] leading-relaxed">
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="light"
+          enableSystem
+          disableTransitionOnChange={false}
+        >
+          <QueryProvider>
+            {children}
+            <Toaster position="top-right" richColors />
+          </QueryProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

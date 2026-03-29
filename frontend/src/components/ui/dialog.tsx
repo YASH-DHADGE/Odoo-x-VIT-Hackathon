@@ -14,11 +14,14 @@ function Dialog({ ...props }: DialogPrimitive.Root.Props) {
 type DialogTriggerProps = DialogPrimitive.Trigger.Props & { asChild?: boolean };
 
 function DialogTrigger({ asChild, children, ...props }: DialogTriggerProps) {
-  if (asChild) {
+  if (asChild && React.isValidElement(children)) {
+    // Pass the child element as the render prop so @base-ui merges
+    // its trigger behaviour into the child's DOM element directly,
+    // preventing a nested <button><button> situation.
     return (
       <DialogPrimitive.Trigger
         data-slot="dialog-trigger"
-        render={children as React.ReactElement}
+        render={children}
         {...props}
       />
     )
