@@ -1,0 +1,10 @@
+const { spawnSync } = require('child_process');
+const result = spawnSync('npx.cmd', ['prisma', 'validate'], { stdio: 'pipe' });
+const out = result.stdout ? result.stdout.toString() : '';
+const err = result.stderr ? result.stderr.toString() : '';
+console.log('--- STDOUT ---');
+out.split('\n').forEach(l => console.log('OUT:', l.replace(/\r/g, '\\r')));
+console.log('--- STDERR ---');
+err.split('\n').forEach(l => console.log('ERR:', l.replace(/\r/g, '\\r')));
+console.log('STATUS:', result.status);
+process.exit(result.status || 0);
