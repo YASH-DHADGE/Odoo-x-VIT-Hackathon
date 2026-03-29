@@ -49,9 +49,12 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response Interceptor: Handle 401s and Token Refresh
+// Response Interceptor: Handle 401s, Token Refresh, and Unwrap Envelope
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    response.data = unwrapApiEnvelope(response.data);
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
 
