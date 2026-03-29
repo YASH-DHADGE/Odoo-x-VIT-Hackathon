@@ -54,8 +54,8 @@ services:
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
       CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
       CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
-      GOOGLE_CLOUD_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT_ID}
-      GOOGLE_CLOUD_KEY_FILE: ${GOOGLE_CLOUD_KEY_FILE}
+      OCR_SPACE_API_KEY: ${OCR_SPACE_API_KEY}
+      OCR_SPACE_API_URL: ${OCR_SPACE_API_URL:-https://api.ocr.space/parse/image}
       EXCHANGE_RATE_API_URL: https://api.exchangerate-api.com/v4/latest
     depends_on:
       postgres:

@@ -8,12 +8,16 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 var OcrProcessor_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.OcrProcessor = void 0;
 const bullmq_1 = require("@nestjs/bullmq");
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
+const axios_1 = __importDefault(require("axios"));
 const prisma_service_1 = require("../prisma/prisma.service");
 const queues_constant_1 = require("../../common/constants/queues.constant");
 let OcrProcessor = OcrProcessor_1 = class OcrProcessor extends bullmq_1.WorkerHost {
@@ -33,11 +37,12 @@ let OcrProcessor = OcrProcessor_1 = class OcrProcessor extends bullmq_1.WorkerHo
             data: { status: 'PROCESSING' },
         });
         try {
-            const parsedData = await this.callGoogleVision(imageUrl);
+            const { parsedData, rawResponse } = await this.callOcrSpace(imageUrl);
             await this.prisma.ocrJob.update({
                 where: { id: jobId },
                 data: {
                     status: 'COMPLETED',
+                    rawResponse,
                     parsedData,
                 },
             });
@@ -53,15 +58,41 @@ let OcrProcessor = OcrProcessor_1 = class OcrProcessor extends bullmq_1.WorkerHo
             throw error;
         }
     }
-    async callGoogleVision(imageUrl) {
-        const keyFile = this.configService.get('GOOGLE_CLOUD_KEY_FILE');
-        const vision = await import('@google-cloud/vision');
-        const client = new vision.ImageAnnotatorClient({
-            keyFilename: keyFile,
+    async callOcrSpace(imageUrl) {
+        const apiKey = this.configService.get('OCR_SPACE_API_KEY');
+        if (!apiKey) {
+            throw new Error('OCR_SPACE_API_KEY is not configured');
+        }
+        const endpoint = this.configService.get('OCR_SPACE_API_URL') ?? 'https://api.ocr.space/parse/image';
+        const body = new URLSearchParams({
+            apikey: apiKey,
+            url: imageUrl,
+            language: 'eng',
+            isOverlayRequired: 'false',
+            OCREngine: '2',
+            scale: 'true',
         });
-        const [result] = await client.documentTextDetection(imageUrl);
-        const fullText = result.fullTextAnnotation?.text || '';
-        return this.parseReceiptText(fullText);
+        const response = await axios_1.default.post(endpoint, body.toString(), {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            timeout: 30000,
+        });
+        const data = response.data;
+        if (data?.IsErroredOnProcessing) {
+            const errorMessage = Array.isArray(data.ErrorMessage)
+                ? data.ErrorMessage.join('; ')
+                : data.ErrorMessage || 'OCR.space processing failed';
+            throw new Error(errorMessage);
+        }
+        const fullText = (data?.ParsedResults ?? [])
+            .map((item) => item?.ParsedText ?? '')
+            .join('\n')
+            .trim();
+        return {
+            rawResponse: data,
+            parsedData: this.parseReceiptText(fullText),
+        };
     }
     parseReceiptText(text) {
         const amountMatch = text.match(/(?:total|amount|subtotal)[:\s]*[$₹€£]?\s*(\d+[\.,]\d{2})/i);

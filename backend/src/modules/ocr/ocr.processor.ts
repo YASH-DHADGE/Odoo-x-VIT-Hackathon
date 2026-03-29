@@ -2,6 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { QUEUE_NAMES } from '../../common/constants/queues.constant';
 
@@ -26,12 +27,13 @@ export class OcrProcessor extends WorkerHost {
     });
 
     try {
-      const parsedData = await this.callGoogleVision(imageUrl);
+      const { parsedData, rawResponse } = await this.callOcrSpace(imageUrl);
 
       await this.prisma.ocrJob.update({
         where: { id: jobId },
         data: {
           status: 'COMPLETED',
+          rawResponse,
           parsedData,
         },
       });
@@ -50,19 +52,53 @@ export class OcrProcessor extends WorkerHost {
     }
   }
 
-  private async callGoogleVision(imageUrl: string) {
-    const keyFile = this.configService.get<string>('GOOGLE_CLOUD_KEY_FILE');
+  private async callOcrSpace(imageUrl: string) {
+    const apiKey = this.configService.get<string>('OCR_SPACE_API_KEY');
+    if (!apiKey) {
+      throw new Error('OCR_SPACE_API_KEY is not configured');
+    }
 
-    // Dynamically import to avoid startup failure if key not configured
-    const vision = await import('@google-cloud/vision');
-    const client = new vision.ImageAnnotatorClient({
-      keyFilename: keyFile,
+    const endpoint =
+      this.configService.get<string>('OCR_SPACE_API_URL') ?? 'https://api.ocr.space/parse/image';
+
+    const body = new URLSearchParams({
+      apikey: apiKey,
+      url: imageUrl,
+      language: 'eng',
+      isOverlayRequired: 'false',
+      OCREngine: '2',
+      scale: 'true',
     });
 
-    const [result] = await client.documentTextDetection(imageUrl);
-    const fullText = result.fullTextAnnotation?.text || '';
+    const response = await axios.post(endpoint, body.toString(), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      timeout: 30000,
+    });
 
-    return this.parseReceiptText(fullText);
+    const data = response.data as {
+      IsErroredOnProcessing?: boolean;
+      ErrorMessage?: string | string[];
+      ParsedResults?: Array<{ ParsedText?: string }>;
+    };
+
+    if (data?.IsErroredOnProcessing) {
+      const errorMessage = Array.isArray(data.ErrorMessage)
+        ? data.ErrorMessage.join('; ')
+        : data.ErrorMessage || 'OCR.space processing failed';
+      throw new Error(errorMessage);
+    }
+
+    const fullText = (data?.ParsedResults ?? [])
+      .map((item) => item?.ParsedText ?? '')
+      .join('\n')
+      .trim();
+
+    return {
+      rawResponse: data,
+      parsedData: this.parseReceiptText(fullText),
+    };
   }
 
   private parseReceiptText(text: string) {

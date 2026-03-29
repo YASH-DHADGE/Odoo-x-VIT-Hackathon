@@ -14,6 +14,6 @@ export declare class OcrProcessor extends WorkerHost {
         category: string;
         rawText: string;
     }>;
-    private callGoogleVision;
+    private callOcrSpace;
     private parseReceiptText;
 }
